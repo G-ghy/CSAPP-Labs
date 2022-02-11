@@ -1,7 +1,7 @@
 /* 
  * CS:APP Data Lab 
  * 
- * <Please put your name and userid here>
+ * NAME:ghy
  * 
  * bits.c - Source file with your solutions to the Lab.
  *          This is the file you will hand in to your instructor.
@@ -140,7 +140,7 @@ NOTES:
  *   Rating: 1
  */
 int bitXor(int x, int y) {
-  return 2;
+  return (~(~x & ~y)) & (~(x & y));
 }
 /* 
  * tmin - return minimum two's complement integer 
@@ -149,7 +149,7 @@ int bitXor(int x, int y) {
  *   Rating: 1
  */
 int tmin(void) {
-  return 2;
+  return (1 << 31);
 }
 //2
 /*
@@ -160,7 +160,9 @@ int tmin(void) {
  *   Rating: 2
  */
 int isTmax(int x) {
-  return 2;
+  return !((~(x + 1) ^ x) | !(x + 1));
+  // return !(x ^ 0x7FFFFFFF);
+  // return  !(~(x + 1) ^ x);
 }
 /* 
  * allOddBits - return 1 if all odd-numbered bits in word set to 1
@@ -170,7 +172,8 @@ int isTmax(int x) {
  *   Rating: 2
  */
 int allOddBits(int x) {
-  return 2;
+  int y = (0xAA << 24 | 0xAA << 16 | 0xAA << 8 | 0xAA);
+  return !((x & y) ^ y);
 }
 /* 
  * negate - return -x 
@@ -180,7 +183,7 @@ int allOddBits(int x) {
  *   Rating: 2
  */
 int negate(int x) {
-  return 2;
+  return (~x + 1);
 }
 //3
 /* 
@@ -193,7 +196,10 @@ int negate(int x) {
  *   Rating: 3
  */
 int isAsciiDigit(int x) {
-  return 2;
+  // int flag_high = (x & 0xF0) ^ 0x30;
+  int flag_high = (x >> 4) ^ 3;
+  int flag_low = ((x >> 3) & 1) & (((x >> 2) & 1) | ((x >> 1) & 1));
+  return !(flag_high | flag_low); 
 }
 /* 
  * conditional - same as x ? y : z 
@@ -203,7 +209,9 @@ int isAsciiDigit(int x) {
  *   Rating: 3
  */
 int conditional(int x, int y, int z) {
-  return 2;
+    int flag = !!x + (~0);
+
+    return ((~flag & y) ^ (flag & z));
 }
 /* 
  * isLessOrEqual - if x <= y  then return 1, else return 0 
@@ -213,7 +221,15 @@ int conditional(int x, int y, int z) {
  *   Rating: 3
  */
 int isLessOrEqual(int x, int y) {
-  return 2;
+    int symbolX = (x >> 31) & 1;
+    int symbolY = (y >> 31) & 1;
+    int overflow = symbolX ^ symbolY;
+
+    int subtractionRes = x + (~y + 1);
+    int subtractionResEqualZero = !subtractionRes;
+    int subtractionResLessThanZero = (subtractionRes >> 31) & 1; 
+    // return (((symbolX ^ symbolY) & symbolX) | is_zero | ((res >> 31) & 1)) & 1;
+    return ((!overflow) & (subtractionResEqualZero | subtractionResLessThanZero)) | (overflow & symbolX);
 }
 //4
 /* 
@@ -225,7 +241,7 @@ int isLessOrEqual(int x, int y) {
  *   Rating: 4 
  */
 int logicalNeg(int x) {
-  return 2;
+  return (((x | (~x + 1)) >> 31) & 1) ^ 1;
 }
 /* howManyBits - return the minimum number of bits required to represent x in
  *             two's complement
@@ -240,7 +256,33 @@ int logicalNeg(int x) {
  *  Rating: 4
  */
 int howManyBits(int x) {
-  return 0;
+    // x >= 0: symbol = 0000000...
+    // x < 0:  symbol = 1111111...
+    // 把寻找正数最高位1和负数最高位0的操作统一为寻找最高为1
+    int symbol = x >> 31;
+    int bit_16, bit_8, bit_4, bit_2, bit_1, bit_0;
+
+    x = (symbol & (~x)) | (~symbol & x);
+    
+    // 寻找最高位的1
+    bit_16 = !!(x >> 16) << 4;
+    x >>= bit_16;
+    
+    bit_8 = !!(x >> 8) << 3;
+    x >>= bit_8;
+
+    bit_4 = !!(x >> 4) << 2;
+    x >>= bit_4;
+
+    bit_2 = !!(x >> 2) << 1;
+    x >>= bit_2;
+
+    bit_1 = !!(x >> 1);
+    x >>= bit_1;
+    
+    bit_0 = x; // 剩余的最高位，为1则加上它本身的位置
+
+    return bit_16 + bit_8 + bit_4 + bit_2 + bit_1 + bit_0 + 1; // +1是符号位
 }
 //float
 /* 
@@ -255,7 +297,16 @@ int howManyBits(int x) {
  *   Rating: 4
  */
 unsigned float_twice(unsigned uf) {
-  return 2;
+  unsigned exp = uf & 0x7f800000;
+  unsigned frac = uf & 0x7fffff;
+
+  if (exp == 0x7f800000) return uf; // exp全1：无穷 || Nan 直接返回即可
+  else if (!exp) frac <<= 1; // exp全0：非规格化数，将frac*2
+  else {
+    exp += 0x800000;
+    if (exp == 0x7f800000) frac = 0; // 处理非规格化数运算后结果为无穷的情况
+  }
+  return (uf & 0x80000000) | exp | frac;
 }
 /* 
  * float_i2f - Return bit-level equivalent of expression (float) x
@@ -266,9 +317,60 @@ unsigned float_twice(unsigned uf) {
  *   Max ops: 30
  *   Rating: 4
  */
+
 unsigned float_i2f(int x) {
-  return 2;
+  unsigned unx, tmp_unx;
+  int e, exp, frac;
+  int cnt; // 统计位数
+  int overflow; // 计算得到frac需要移位的数量
+  int flag; // 标记舍入是否需要进位
+  int i, m;
+  
+  unx = x;
+  if (x < 0) unx = -unx;
+  tmp_unx = unx;
+  
+  cnt = 0;
+  while (unx) {
+      ++cnt;
+      unx >>= 1;
+  }
+
+  unx = tmp_unx;
+  //if (x < 0) unx = -unx;
+
+  if (!x) {
+    exp = 0;
+  } else {
+      e = cnt - 1;
+      exp = (e + 127) << 23;
+  }
+  //exp &= 0x7f800000; // 这里不会在exp的区域产生多余的数字
+  
+  flag = 0;
+  overflow = 24 - cnt; // 23 - (cnt - 1)
+  if (overflow > 0) {
+    //unx &= 0x7fffff; // 即使这里左移后23bit以外有其他值，下面的frac&=还会进行处理
+    frac = unx << overflow;
+  } else {
+      overflow = -overflow;
+      frac = unx >> overflow;
+      if ((unx >> (overflow - 1)) & 1) {
+          i = m = 0;
+          while (i < overflow - 1) {
+              m |= unx >> i;
+              ++i;
+          }
+          if (m & 1) flag = 1; // 超过一半，向上舍入
+          else flag = frac & 1; // 恰好一半，向偶数舍入
+      }
+  }
+  frac &= 0x7fffff; // unx在移位后23bit以外可能有无用的1，需要除去 
+
+  return ((x & 0x80000000) | exp | frac) + flag;
 }
+
+
 /* 
  * float_f2i - Return bit-level equivalent of expression (int) f
  *   for floating point argument f.
@@ -282,5 +384,20 @@ unsigned float_i2f(int x) {
  *   Rating: 4
  */
 int float_f2i(unsigned uf) {
-  return 2;
+    int symbol = uf & 0x80000000;
+    int exp = uf & 0x7f800000, e;
+    int frac = uf & 0x7fffff;
+    
+    e = (exp >> 23) - 127;
+    if (e < 0) return 0;
+    if (e >= 31) return 0x80000000u;
+    if (e < 23) {
+        frac >>= 23 - e;
+        frac |= 1 << e;
+    } else {
+        frac |= 1 << 23;
+    }
+    
+    if (symbol == 0x80000000) frac = -frac; // 如果最后为负数，需要注意存储方式为补码，负数需要取反加一
+    return symbol | frac;
 }

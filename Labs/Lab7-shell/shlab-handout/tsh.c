@@ -48,8 +48,7 @@ struct job_t {              /* The job struct */
     int state;              /* UNDEF, BG, FG, or ST */
     char cmdline[MAXLINE];  /* command line */
 };
-struct job_t jobs[MAXJOBS]; /* The job list */
-/* End global variables */
+struct job_t jobs[MAXJOBS]; /* The job list */ /* End global variables */
 
 
 /* Function prototypes */
@@ -131,22 +130,22 @@ int main(int argc, char **argv)
     /* Execute the shell's read/eval loop */
     while (1) {
 
-	/* Read command line */
-	if (emit_prompt) {
-	    printf("%s", prompt);
-	    fflush(stdout);
-	}
-	if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin))
-	    app_error("fgets error");
-	if (feof(stdin)) { /* End of file (ctrl-d) */
-	    fflush(stdout);
-	    exit(0);
-	}
+	    /* Read command line */
+	    if (emit_prompt) {
+	        printf("%s", prompt);
+	        fflush(stdout);
+	    }
+	    if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin))
+	        app_error("fgets error");
+	    if (feof(stdin)) { /* End of file (ctrl-d) */
+	        fflush(stdout);
+	        exit(0);
+	    }
 
-	/* Evaluate the command line */
-	eval(cmdline);
-	fflush(stdout);
-	fflush(stdout);
+    	/* Evaluate the command line */
+	    eval(cmdline);
+	    fflush(stdout);
+	    fflush(stdout);
     } 
 
     exit(0); /* control never reaches here */
@@ -165,6 +164,46 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char *argv[MAXARGS];/*Argument list execve() */
+    char buf[MAXLINE];/*Holds modified command line */
+    int bg;/*Should the job run in bg or fg? */
+    pid_t pid;/*Process id */
+    sigset_t mask_all,mask_one,prev_one;
+
+    strcpy(buf, cmdline);
+    bg = parseline(buf, argv);
+    if (argv[0] == NULL)
+        return;/* Ignore empty lines */
+
+    if (!builtin_cmd(argv)) {
+        sigfillset(&mask_all);
+        sigemptyset(&mask_one);
+        sigaddset(&mask_one, SIGCHLD);
+
+        sigprocmask(SIG_BLOCK, &mask_one, &prev_one);
+        // 只有子进程的pid==0，即只有子进程执行下面的if
+        if ((pid = fork()) == 0) {/* Child runs user job */
+            sigprocmask(SIG_SETMASK, &prev_one, NULL);
+            setpgid(0, 0);
+            if (execve(argv[0], argv, environ) < 0) {
+                printf("%s: Command not found\n", argv[0]);
+                exit(0);
+            }
+        }
+
+        sigprocmask(SIG_BLOCK, &mask_all, NULL);
+        int mode = (bg == 0) ? FG : BG;
+        addjob(jobs,pid,mode,cmdline);
+        sigprocmask(SIG_SETMASK, &prev_one, NULL);
+
+        /* Parent waits for foreground job to terminate */
+        if (!bg) {
+            waitfg(pid);
+        }
+        else
+            printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
+    }
+
     return;
 }
 
@@ -229,16 +268,65 @@ int parseline(const char *cmdline, char **argv)
  * builtin_cmd - If the user has typed a built-in command then execute
  *    it immediately.  
  */
-int builtin_cmd(char **argv) 
+int builtin_cmd(char **argv)
 {
-    return 0;     /* not a builtin command */
-}
+     if (!strcmp(argv[0], "quit"))
+         exit(0);
 
+     if (!strcmp(argv[0], "&"))
+         return 1;
+
+     // 三者的命令格式是相同的，均可通过do_bgfg解决
+     if (!strcmp(argv[0], "fg") || !strcmp(argv[0], "bg") || !strcmp(argv[0], "kill")) {
+         do_bgfg(argv);
+         return 1;
+     }
+
+     if (!strcmp(argv[0], "jobs")) {
+         listjobs(jobs); // 提供的现成工具
+         return 1;
+     }
+
+     return 0;
+}
 /* 
  * do_bgfg - Execute the builtin bg and fg commands
  */
 void do_bgfg(char **argv) 
 {
+    pid_t pid;
+    int jid;
+    struct job_t *job = NULL;
+    
+    // 缺少参数
+    if (!argv[1]) {
+        printf ("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
+    }
+    if (sscanf(argv[1], "%d", &pid) > 0) {
+        if ((job = getjobpid(jobs, pid)) == NULL) { // 参数合法但是没有找到对应进程
+            printf ("(%s): No such process\n", argv[1]);
+            return;
+        }
+    } else if (sscanf(argv[1], "%%%d", &jid) > 0) {
+        if ((job = getjobjid(jobs, jid)) == NULL) { // 参数合法但是没有找到对应进程
+            printf ("%s: No such job\n", argv[1]);
+            return;
+        }
+    } else { // 参数非法
+        printf ("%s: argument must be a PID or %%jobid\n", argv[0]);
+        return;
+    }
+
+    // 参数合法且具有对应进程
+    kill(-(job->pid), SIGCONT);
+    if (!strcmp(argv[0], "bg")) {
+        job->state = BG;
+        printf ("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
+    } else {
+        job->state = FG;
+        waitfg(job->pid);
+    }
     return;
 }
 
@@ -247,6 +335,15 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    sigset_t mask, prev;
+    
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &mask, &prev);
+    while (fgpid(jobs) != 0){ // 存在前台进程则等待
+        sigsuspend(&prev);
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
     return;
 }
 
@@ -263,6 +360,26 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    sigset_t mask_all, prev;
+    int status;
+    pid_t pid;
+    struct job_t *job;
+    
+    sigfillset(&mask_all);
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+        sigprocmask(SIG_BLOCK, &mask_all, &prev);
+        if (WIFEXITED(status)) {
+            deletejob(jobs, pid);
+        } else if (WIFSIGNALED(status)) {
+            printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+            deletejob(jobs, pid);
+        } else if (WIFSTOPPED(status)) {
+            printf("Job [%d] (%d) stoped by signal %d\n", pid2jid(pid), pid, WSTOPSIG(status));
+            job = getjobpid(jobs, pid);
+            job->state = ST;
+        }
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+    }
     return;
 }
 
@@ -271,8 +388,11 @@ void sigchld_handler(int sig)
  *    user types ctrl-c at the keyboard.  Catch it and send it along
  *    to the foreground job.  
  */
-void sigint_handler(int sig) 
+void sigint_handler(int sig)
 {
+    pid_t pid;
+    if ((pid = fgpid(jobs)) > 0)
+        kill(-pid, sig);
     return;
 }
 
@@ -281,8 +401,11 @@ void sigint_handler(int sig)
  *     the user types ctrl-z at the keyboard. Catch it and suspend the
  *     foreground job by sending it a SIGTSTP.  
  */
-void sigtstp_handler(int sig) 
+void sigtstp_handler(int sig)
 {
+    pid_t pid;
+    if ((pid = fgpid(jobs)) > 0)
+        kill(-pid, sig);
     return;
 }
 

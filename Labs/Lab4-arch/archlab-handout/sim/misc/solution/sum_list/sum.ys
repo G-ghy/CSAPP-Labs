@@ -1,0 +1,36 @@
+.pos 0 #设置当前位置为0
+    irmovq stack, %rsp #设置栈指针
+    call main
+    halt
+
+# Sample linked list
+    .align 8 # 在8字节边界处对齐
+ele1:
+    .quad 0x00a
+    .quad ele2
+ele2:
+    .quad 0x0b0
+    .quad ele3
+ele3:
+    .quad 0xc00
+    .quad 0
+
+main:
+    irmovq ele1, %rdi # 链表第一个元素ele1作为第一个参数%rdi
+    call sum_list
+    ret
+
+sum_list:
+    xorq %rax, %rax
+    jmp test
+loop:
+    mrmovq (%rdi), %r10
+    addq %r10, %rax
+    mrmovq 8(%rdi), %rdi
+test:
+    andq %rdi, %rdi
+    jne loop
+    ret
+
+    .pos 0x200 #设置栈地址
+stack:

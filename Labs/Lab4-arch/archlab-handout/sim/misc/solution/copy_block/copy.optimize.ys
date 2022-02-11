@@ -1,0 +1,51 @@
+.pos 0 #设置当前位置为0
+    irmovq stack, %rsp #设置栈指针
+    call main
+    halt
+
+    .align 8
+# Source block
+src:
+    .quad 0x00a
+    .quad 0x0b0
+    .quad 0xc00
+# Destination block
+dest:
+    .quad 0x111
+    .quad 0x222
+    .quad 0x333
+
+main:
+    irmovq dest, %rdi
+    irmovq src, %rsi
+    irmovq $3, %rdx
+    call copy_block
+    ret
+
+copy_block:
+    pushq %rbx
+    pushq %r8
+    pushq %r9
+    irmovq $1, %r8
+    irmovq $8, %r9
+
+loop:
+    andq %rdx, %rdx
+    jle end
+
+    mrmovq (%rsi), %rbx
+    rmmovq %rbx, (%rdi)
+
+    addq %r9, %rdi
+    addq %r9, %rsi
+    subq %r8, %rdx
+    
+    jmp loop
+end:
+    popq %r9
+    popq %r8
+    popq %rbx
+    ret
+
+    .pos 0x200 #设置栈地址
+stack:
